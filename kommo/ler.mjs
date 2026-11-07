@@ -74,36 +74,36 @@ async function entrar(page) {
   }
   if (pedeCodigo) {
     // sem código na rodada: espera até 8 min o código que o Diego informar (Idealize: public.robo_codigo_pegar)
-    let codigo = CODIGO
-    for (let i = 0; !codigo && i < 48; i++) {
-      if (i === 0) console.log('A Kommo pediu o código de verificação: aguardando o código (até 8 min).')
-      codigo = String((await rpc('robo_codigo_pegar', { p_robo: 'kommo' }).catch(() => null)) || '').replace(/\D/g, '')
-      if (!codigo) await page.waitForTimeout(10000)
-    }
-    if (!codigo) throw new Error('a Kommo pediu o código de verificação e ele não chegou em 8 minutos')
-    const campo = page.locator('[class*="auth_mfa" i] input:visible, input[name*="code" i]:visible, input[autocomplete="one-time-code"]:visible, input[inputmode="numeric"]:visible').first()
-    const alvo = (await campo.count()) ? campo : page.locator('input[type="text"]:visible, input[type="number"]:visible, input[type="tel"]:visible').last()
-    const vis = await page.evaluate(() => [...document.querySelectorAll('input')].filter(e => e.offsetParent !== null)
-      .map(e => `${e.type}|${e.name}|${e.maxLength}|${String(e.className).slice(0, 60)}`))
-    console.log('Tela do código, campos visíveis:', JSON.stringify(vis))
-    // a Kommo usa 6 caixinhas de 1 dígito (input.auth__mfa-input-code): um dígito em cada
     const caixas = page.locator('input.auth__mfa-input-code:visible, input[name="AUTH_CODE"]:visible')
-    const n = await caixas.count()
-    if (n >= codigo.length) {
-      for (let i = 0; i < codigo.length; i++) { await caixas.nth(i).click(); await caixas.nth(i).pressSequentially(codigo[i], { delay: 60 }) }
-    } else {
-      await alvo.click(); await page.keyboard.type(codigo, { delay: 120 })
+    // até 3 tentativas na mesma tela: se a Kommo recusar, espera outro código (o mesmo e-mail pode ter chegado com dígito trocado)
+    let usado = ''
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      let codigo = tentativa === 1 ? CODIGO : ''
+      for (let i = 0; !codigo && i < 48; i++) {
+        if (i === 0) console.log(`Tentativa ${tentativa}: aguardando o código de verificação (até 8 min).`)
+        codigo = String((await rpc('robo_codigo_pegar', { p_robo: 'kommo' }).catch(() => null)) || '').replace(/\D/g, '')
+        if (codigo === usado) codigo = ''
+        if (!codigo) await page.waitForTimeout(10000)
+      }
+      if (!codigo) throw new Error('a Kommo pediu o código de verificação e ele não chegou em 8 minutos')
+      usado = codigo
+      const n = await caixas.count()
+      for (let k = 0; k < n; k++) await caixas.nth(k).fill('')
+      if (n >= codigo.length) {
+        for (let k = 0; k < codigo.length; k++) { await caixas.nth(k).click(); await caixas.nth(k).pressSequentially(codigo[k], { delay: 60 }) }
+      } else {
+        await page.locator('input[type="tel"]:visible, input[type="text"]:visible').last().click(); await page.keyboard.type(codigo, { delay: 120 })
+      }
+      console.log('Caixas do código preenchidas:', await caixas.evaluateAll(es => es.map(e => e.value ? '*' : '_').join('')))
+      await page.waitForTimeout(2500)
+      const botao = page.locator('[class*="auth_mfa" i] button:visible, button:has-text("Confirmar"):visible, button:has-text("Verificar"):visible, button:has-text("Confirm"):visible').first()
+      if (new URL(page.url()).pathname.length <= 1 && await botao.count()) await botao.click().catch(() => {})
+      await page.waitForTimeout(6000)
+      if (new URL(page.url()).pathname.length > 1) break
+      const erroMfa = (await page.locator('.js-auth-mfa-error, [class*="mfa-error"]').allInnerTexts().catch(() => [])).join(' ').trim()
+      console.log(`Kommo respondeu à tentativa ${tentativa}:`, (erroMfa || 'sem mensagem').slice(0, 120))
+      if (!/invalid|inválid/i.test(erroMfa)) break
     }
-    const preenchido = await caixas.evaluateAll(es => es.map(e => e.value ? '*' : '_').join(''))
-    console.log('Caixas do código preenchidas:', preenchido)
-    await page.waitForTimeout(2500)
-    const botao = page.locator('[class*="auth_mfa" i] button:visible, button:has-text("Confirmar"):visible, button:has-text("Verificar"):visible, button:has-text("Confirm"):visible').first()
-    if (new URL(page.url()).pathname.length <= 1) {
-      if (await botao.count()) await botao.click().catch(() => {}); else await page.keyboard.press('Enter')
-    }
-    await page.waitForTimeout(6000)
-    const erroMfa = (await page.locator('.js-auth-mfa-error, [class*="mfa-error"]').allInnerTexts().catch(() => [])).join(' ').trim()
-    if (erroMfa) console.log('Kommo respondeu ao código:', erroMfa.slice(0, 120))
     await page.waitForTimeout(5000)
   }
   await page.waitForURL(u => !/auth|login/i.test(new URL(String(u)).pathname) && new URL(String(u)).pathname !== '/', { timeout: 45000 }).catch(() => {})
