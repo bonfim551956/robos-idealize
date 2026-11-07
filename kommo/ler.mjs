@@ -19,9 +19,16 @@ async function rpc(fn, corpo) {
 
 async function entrar(page) {
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
-  await page.getByPlaceholder('Login').fill(KOMMO_EMAIL)
-  await page.getByPlaceholder('Senha').fill(KOMMO_SENHA)
-  await page.getByRole('button', { name: /^Login$/ }).click()
+  const usuario = page.locator('input[name="username"], #session_end_login, input[type="email"], input[placeholder*="ogin" i], input[placeholder*="mail" i]').first()
+  const achou = await usuario.waitFor({ timeout: 30000 }).then(() => true).catch(() => false)
+  if (!achou) {
+    const diag = await page.evaluate(() => ({ caminho: location.pathname, campos: [...document.querySelectorAll('input')].map(e => `${e.type}|${e.name}|${e.placeholder}`).slice(0, 8),
+      titulo: document.title.slice(0, 60) }))
+    throw new Error('tela de login diferente: ' + JSON.stringify(diag))
+  }
+  await usuario.fill(KOMMO_EMAIL)
+  await page.locator('input[type="password"]').first().fill(KOMMO_SENHA)
+  await page.locator('button[type="submit"], #auth_submit, button:has-text("Login"), button:has-text("Entrar")').first().click()
   await page.waitForURL(u => !/auth|login/i.test(new URL(String(u)).pathname) && new URL(String(u)).pathname !== '/', { timeout: 45000 }).catch(() => {})
   await page.waitForLoadState('networkidle').catch(() => {})
   // confere se entrou (sem mostrar nada do cliente)
@@ -59,7 +66,7 @@ const fila = await rpc('aud_fila', { p_dia: DIA })
 console.log(`${fila.length} conversa(s) na fila.`)
 if (!fila.length) process.exit(0)
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'pt-BR' })
 let lidas = 0, msgs = 0, erros = 0
 try {
   await entrar(page)
