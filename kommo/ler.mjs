@@ -86,12 +86,24 @@ async function entrar(page) {
     const vis = await page.evaluate(() => [...document.querySelectorAll('input')].filter(e => e.offsetParent !== null)
       .map(e => `${e.type}|${e.name}|${e.maxLength}|${String(e.className).slice(0, 60)}`))
     console.log('Tela do código, campos visíveis:', JSON.stringify(vis))
-    // digita como uma pessoa (serve para campo único ou para caixinhas de 1 dígito)
-    await alvo.click()
-    await page.keyboard.type(codigo, { delay: 120 })
-    await page.waitForTimeout(800)
+    // a Kommo usa 6 caixinhas de 1 dígito (input.auth__mfa-input-code): um dígito em cada
+    const caixas = page.locator('input.auth__mfa-input-code:visible, input[name="AUTH_CODE"]:visible')
+    const n = await caixas.count()
+    if (n >= codigo.length) {
+      for (let i = 0; i < codigo.length; i++) { await caixas.nth(i).click(); await caixas.nth(i).pressSequentially(codigo[i], { delay: 60 }) }
+    } else {
+      await alvo.click(); await page.keyboard.type(codigo, { delay: 120 })
+    }
+    const preenchido = await caixas.evaluateAll(es => es.map(e => e.value ? '*' : '_').join(''))
+    console.log('Caixas do código preenchidas:', preenchido)
+    await page.waitForTimeout(2500)
     const botao = page.locator('[class*="auth_mfa" i] button:visible, button:has-text("Confirmar"):visible, button:has-text("Verificar"):visible, button:has-text("Confirm"):visible').first()
-    if (await botao.count()) await botao.click().catch(() => {}); else await page.keyboard.press('Enter')
+    if (new URL(page.url()).pathname.length <= 1) {
+      if (await botao.count()) await botao.click().catch(() => {}); else await page.keyboard.press('Enter')
+    }
+    await page.waitForTimeout(6000)
+    const erroMfa = (await page.locator('.js-auth-mfa-error, [class*="mfa-error"]').allInnerTexts().catch(() => [])).join(' ').trim()
+    if (erroMfa) console.log('Kommo respondeu ao código:', erroMfa.slice(0, 120))
     await page.waitForTimeout(5000)
   }
   await page.waitForURL(u => !/auth|login/i.test(new URL(String(u)).pathname) && new URL(String(u)).pathname !== '/', { timeout: 45000 }).catch(() => {})
