@@ -48,15 +48,21 @@ async function entrar(page) {
   await page.waitForURL(/\/Home\//, { timeout: 30000 })
 }
 
+// botão Localizar: clique normal; se a tela de "carregando" ficar por cima, aciona o botão direto
+async function localizar(page) {
+  const btn = (await page.locator('#btn_localizar').count()) ? page.locator('#btn_localizar').first() : page.getByText('Localizar', { exact: true }).first()
+  try { await btn.click({ timeout: 10000 }) } catch { await btn.evaluate(b => b.click()) }
+}
+
 // relatório mensal (Operação ou Recebimentos) + detalhe de cada dia recente
 async function relatorioMensal(page, caminho, nome) {
   for (let m = 0; m < MESES; m++) {
     await page.goto(BASE + caminho, { waitUntil: 'domcontentloaded' })
     const opcoes = await page.locator('#periodo option').allTextContents()
     const idx = opcoes.findIndex(t => /CORRENTE/i.test(t)); if (idx < 0) throw new Error(`${nome}: período corrente não encontrado`)
+    if (idx + m >= opcoes.length) break
     await page.locator('#periodo').selectOption({ index: idx + m })
-    const btn = page.locator('#btn_localizar')
-    if (await btn.count()) await btn.first().click(); else await page.getByText('Localizar', { exact: true }).first().click()
+    await localizar(page)
     await page.locator('table th').first().waitFor({ timeout: 30000 })
     const tabs = await lerTabelas(page)
     await gravar(nome, `periodo=${opcoes[idx + m].trim()}`, null, tabs[0])
@@ -81,7 +87,7 @@ async function garantias(page) {
     await page.locator('#tipoGarantia').selectOption(tipo)
     await page.locator('#periodoInicial').fill(br(ini))
     await page.locator('#periodoFinal').fill(br(hoje))
-    await page.locator('#btn_localizar').click()
+    await localizar(page)
     await page.waitForLoadState('load'); await page.waitForTimeout(1500)
     const tabs = await lerTabelas(page)
     await gravar('garantia', `${tipo}|${br(ini)}-${br(hoje)}`, null, tabs[0] || { cabecalho: [], linhas: [] })
@@ -96,7 +102,7 @@ async function documentos(page) {
     try {
       await page.goto(BASE + '/Consumidor/LocalizaConsumidor/ConsumidorLocaliza?tipoLocaliza=2', { waitUntil: 'domcontentloaded' })
       await page.locator('#parametroConsulta').fill(v.cpf)
-      await page.locator('#btn_localizar').click()
+      await localizar(page)
       const lupa = page.locator('table a[onclick*="ApresentaDocumentos"]').first()
       await lupa.waitFor({ timeout: 20000 })
       const alvo = (String(await lupa.getAttribute('onclick')).match(/submit_href\('([^']+)'/) || [])[1]
@@ -117,15 +123,23 @@ async function documentos(page) {
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 let ok = true
+const etapas = [
+  ['operação', () => relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelOperacao', 'operacao')],
+  ['recebimentos', () => relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelRecebimentos', 'recebimentos')],
+  ['garantias', () => garantias(page)],
+  ['documentos', () => documentos(page)],
+]
 try {
   await entrar(page)
-  await relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelOperacao', 'operacao')
-  await relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelRecebimentos', 'recebimentos')
-  await garantias(page)
-  await documentos(page)
+  for (const [nome, fn] of etapas) {
+    try { await fn() } catch (e) {
+      ok = false
+      console.error(`Falhou (${nome}):`, String(e.message || e).split('\n')[0].slice(0, 200), '| tela:', new URL(page.url()).pathname)
+    }
+  }
 } catch (e) {
   ok = false
-  console.error('Falhou:', String(e.message || e).split('\n')[0].slice(0, 200), '| tela:', new URL(page.url()).pathname)
+  console.error('Falhou no login:', String(e.message || e).split('\n')[0].slice(0, 200))
 } finally { await browser.close() }
 await rpc('multi_rodada', { p_resumo: { ok, telas, linhas: linhasTot, dias: DIAS, meses: MESES, docs_dias: DOCS_DIAS, loja: LOJA } }).catch(() => {})
 console.log(`Telas lidas ${telas}, linhas ${linhasTot}, ${ok ? 'sem erro' : 'com erro'}.`)
