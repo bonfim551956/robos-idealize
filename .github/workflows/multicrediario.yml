@@ -1,0 +1,29 @@
+# Robô de leitura do Multicrediário (São Vicente). Só leitura. Todo dia às 7h (Brasília) e na mão em "Run workflow".
+name: Multicrediário (leitura)
+on:
+  schedule:
+    - cron: '3 10 * * *'
+  workflow_dispatch:
+    inputs:
+      dias: { description: 'Detalhe dos últimos N dias', default: '3' }
+      meses: { description: '1 = mês corrente; 2 = inclui o anterior', default: '1' }
+concurrency: { group: multicrediario, cancel-in-progress: false }
+permissions: { contents: read }
+jobs:
+  ler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: { run: { working-directory: multicrediario } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node ler.mjs
+        env:
+          MULTI_USUARIO: ${{ secrets.MULTI_USUARIO }}
+          MULTI_SENHA: ${{ secrets.MULTI_SENHA }}
+          IDEALIZE_SERVICE_KEY: ${{ secrets.IDEALIZE_SERVICE_KEY }}
+          DIAS: ${{ inputs.dias || '3' }}
+          MESES: ${{ inputs.meses || '1' }}
