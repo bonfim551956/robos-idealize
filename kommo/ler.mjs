@@ -28,14 +28,19 @@ async function entrar(page) {
   }
   await usuario.fill(KOMMO_EMAIL)
   await page.locator('input[type="password"]').first().fill(KOMMO_SENHA)
-  await page.locator('button[type="submit"], #auth_submit, button:has-text("Login"), button:has-text("Entrar")').first().click()
+  await page.locator('input[type="password"]').first().press('Enter')
+  await page.waitForTimeout(4000)
+  if (/^\/?$/.test(new URL(page.url()).pathname)) {
+    await page.locator('button[type="submit"], #auth_submit, button:has-text("Login"), button:has-text("Entrar")').first().click().catch(() => {})
+  }
   await page.waitForURL(u => !/auth|login/i.test(new URL(String(u)).pathname) && new URL(String(u)).pathname !== '/', { timeout: 45000 }).catch(() => {})
   await page.waitForLoadState('networkidle').catch(() => {})
   // confere se entrou (sem mostrar nada do cliente)
   const ok = await page.locator('text=Comunicações').first().isVisible().catch(() => false)
   if (!ok) {
     const diag = await page.evaluate(() => ({ caminho: location.pathname, campos: [...document.querySelectorAll('input')].map(e => e.placeholder || e.type).slice(0, 6),
-      titulos: [...document.querySelectorAll('h1,h2,h3')].map(e => e.innerText.trim()).filter(Boolean).slice(0, 4) }))
+      titulos: [...document.querySelectorAll('h1,h2,h3')].map(e => e.innerText.trim()).filter(Boolean).slice(0, 4),
+      avisos: [...document.querySelectorAll('[class*="error" i], [class*="alert" i], [class*="captcha" i], iframe')].map(e => (e.innerText || e.getAttribute('src') || e.className || '').toString().trim().slice(0, 80)).filter(Boolean).slice(0, 6) }))
     throw new Error('não entrou na Kommo: ' + JSON.stringify(diag))
   }
 }
