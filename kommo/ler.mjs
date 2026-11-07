@@ -60,8 +60,19 @@ async function entrar(page) {
     await page.locator('button[type="submit"], #auth_submit, button:has-text("Login"), button:has-text("Entrar")').first().click().catch(() => {})
   }
   // verificação por e-mail (dispositivo novo): usa o código informado na rodada
-  await page.waitForTimeout(3000)
-  if (/código de verificação|verification code/i.test(await page.locator('body').innerText().catch(() => ''))) {
+  // espera sair do login ou aparecer a tela do código (até 30 s)
+  let pedeCodigo = false
+  for (let i = 0; i < 30; i++) {
+    if (new URL(page.url()).pathname.length > 1) break
+    if (await page.locator('[class*="auth_mfa" i] input:visible, input[autocomplete="one-time-code"]:visible, input[name*="code" i]:visible').count()) { pedeCodigo = true; break }
+    await page.waitForTimeout(1000)
+  }
+  if (!pedeCodigo && new URL(page.url()).pathname.length <= 1) {
+    const vis = await page.evaluate(() => [...document.querySelectorAll('input')].filter(e => e.offsetParent !== null).map(e => `${e.type}|${e.name}|${e.placeholder}|${e.className}`.slice(0, 120)))
+    console.log('Campos visíveis depois do login:', JSON.stringify(vis))
+    pedeCodigo = vis.some(v => !/password|login|checkbox|hidden/i.test(v.split('|')[0] + v.split('|')[2]))
+  }
+  if (pedeCodigo) {
     // sem código na rodada: espera até 8 min o código que o Diego informar (Idealize: public.robo_codigo_pegar)
     let codigo = CODIGO
     for (let i = 0; !codigo && i < 48; i++) {
@@ -70,7 +81,7 @@ async function entrar(page) {
       if (!codigo) await page.waitForTimeout(10000)
     }
     if (!codigo) throw new Error('a Kommo pediu o código de verificação e ele não chegou em 8 minutos')
-    const campo = page.locator('input[name*="code" i]:visible, input[autocomplete="one-time-code"]:visible, input[inputmode="numeric"]:visible, .auth_mfa input:visible').first()
+    const campo = page.locator('[class*="auth_mfa" i] input:visible, input[name*="code" i]:visible, input[autocomplete="one-time-code"]:visible, input[inputmode="numeric"]:visible').first()
     const alvo = (await campo.count()) ? campo : page.locator('input[type="text"]:visible, input[type="number"]:visible, input[type="tel"]:visible').last()
     await alvo.fill(codigo)
     await alvo.press('Enter')
