@@ -62,10 +62,17 @@ async function entrar(page) {
   // verificação por e-mail (dispositivo novo): usa o código informado na rodada
   await page.waitForTimeout(3000)
   if (/código de verificação|verification code/i.test(await page.locator('body').innerText().catch(() => ''))) {
-    if (!CODIGO) throw new Error('a Kommo pediu o código de verificação enviado por e-mail: rode de novo informando o código')
+    // sem código na rodada: espera até 8 min o código que o Diego informar (Idealize: public.robo_codigo_pegar)
+    let codigo = CODIGO
+    for (let i = 0; !codigo && i < 48; i++) {
+      if (i === 0) console.log('A Kommo pediu o código de verificação: aguardando o código (até 8 min).')
+      codigo = String((await rpc('robo_codigo_pegar', { p_robo: 'kommo' }).catch(() => null)) || '').replace(/\D/g, '')
+      if (!codigo) await page.waitForTimeout(10000)
+    }
+    if (!codigo) throw new Error('a Kommo pediu o código de verificação e ele não chegou em 8 minutos')
     const campo = page.locator('input[name*="code" i]:visible, input[autocomplete="one-time-code"]:visible, input[inputmode="numeric"]:visible, .auth_mfa input:visible').first()
     const alvo = (await campo.count()) ? campo : page.locator('input[type="text"]:visible, input[type="number"]:visible, input[type="tel"]:visible').last()
-    await alvo.fill(CODIGO)
+    await alvo.fill(codigo)
     await alvo.press('Enter')
     await page.waitForTimeout(5000)
   }
