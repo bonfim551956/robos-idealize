@@ -3,11 +3,30 @@
 // o TEXTO das mensagens do chat para aud.conversas (public.aud_receber). Nunca digita, nunca envia, nunca muda etapa.
 // O banco tira telefone e e-mail do texto antes de gravar. O log só mostra contagens.
 import { chromium } from 'playwright'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 const { KOMMO_EMAIL, KOMMO_SENHA, IDEALIZE_SERVICE_KEY } = process.env
 const BASE = `https://${process.env.KOMMO_SUBDOMINIO || 'prevendasidealize'}.kommo.com`
 const IDEALIZE_URL = process.env.IDEALIZE_URL || 'https://upkxaovgutzgackexhax.supabase.co'
 const DIA = process.env.DIA || null                       // AAAA-MM-DD (padrão: ontem)
+const CODIGO = (process.env.CODIGO || '').replace(/\D/g, '')  // código de verificação que a Kommo manda por e-mail (1º login)
+// sessão salva entre rodadas (cache do Actions), CRIPTOGRAFADA com chave que só existe nos Secrets
+const ARQ_SESSAO = '.sessao.enc'
+const chave = () => createHash('sha256').update('kommo-sessao|' + KOMMO_SENHA + '|' + IDEALIZE_SERVICE_KEY).digest()
+function salvarSessao(estado) {
+  const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', chave(), iv)
+  const dados = Buffer.concat([c.update(JSON.stringify(estado)), c.final()])
+  writeFileSync(ARQ_SESSAO, Buffer.concat([iv, c.getAuthTag(), dados]))
+}
+function lerSessao() {
+  try {
+    if (!existsSync(ARQ_SESSAO)) return undefined
+    const b = readFileSync(ARQ_SESSAO), d = createDecipheriv('aes-256-gcm', chave(), b.subarray(0, 12))
+    d.setAuthTag(b.subarray(12, 28))
+    return JSON.parse(Buffer.concat([d.update(b.subarray(28)), d.final()]).toString())
+  } catch { return undefined }
+}
 if (!KOMMO_EMAIL || !KOMMO_SENHA || !IDEALIZE_SERVICE_KEY) { console.error('Faltam os Secrets KOMMO_EMAIL, KOMMO_SENHA ou IDEALIZE_SERVICE_KEY.'); process.exit(1) }
 
 const h = { apikey: IDEALIZE_SERVICE_KEY, Authorization: `Bearer ${IDEALIZE_SERVICE_KEY}`, 'Content-Type': 'application/json' }
@@ -17,7 +36,14 @@ async function rpc(fn, corpo) {
   return r.json().catch(() => null)
 }
 
+async function logado(page) {
+  await page.goto(BASE + '/chats/', { waitUntil: 'domcontentloaded' }).catch(() => {})
+  await page.waitForTimeout(3000)
+  return page.locator('text=Comunicações').first().isVisible().catch(() => false)
+}
+
 async function entrar(page) {
+  if (await logado(page)) return
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
   const usuario = page.locator('input[name="username"], #session_end_login, input[type="email"], input[placeholder*="ogin" i], input[placeholder*="mail" i]').first()
   const achou = await usuario.waitFor({ timeout: 30000 }).then(() => true).catch(() => false)
@@ -32,6 +58,16 @@ async function entrar(page) {
   await page.waitForTimeout(4000)
   if (/^\/?$/.test(new URL(page.url()).pathname)) {
     await page.locator('button[type="submit"], #auth_submit, button:has-text("Login"), button:has-text("Entrar")').first().click().catch(() => {})
+  }
+  // verificação por e-mail (dispositivo novo): usa o código informado na rodada
+  await page.waitForTimeout(3000)
+  if (/código de verificação|verification code/i.test(await page.locator('body').innerText().catch(() => ''))) {
+    if (!CODIGO) throw new Error('a Kommo pediu o código de verificação enviado por e-mail: rode de novo informando o código')
+    const campo = page.locator('input[name*="code" i]:visible, input[autocomplete="one-time-code"]:visible, input[inputmode="numeric"]:visible, .auth_mfa input:visible').first()
+    const alvo = (await campo.count()) ? campo : page.locator('input[type="text"]:visible, input[type="number"]:visible, input[type="tel"]:visible').last()
+    await alvo.fill(CODIGO)
+    await alvo.press('Enter')
+    await page.waitForTimeout(5000)
   }
   await page.waitForURL(u => !/auth|login/i.test(new URL(String(u)).pathname) && new URL(String(u)).pathname !== '/', { timeout: 45000 }).catch(() => {})
   await page.waitForLoadState('networkidle').catch(() => {})
@@ -71,10 +107,12 @@ const fila = await rpc('aud_fila', { p_dia: DIA })
 console.log(`${fila.length} conversa(s) na fila.`)
 if (!fila.length) process.exit(0)
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'pt-BR' })
+const contexto = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'pt-BR', storageState: lerSessao() })
+const page = await contexto.newPage()
 let lidas = 0, msgs = 0, erros = 0
 try {
   await entrar(page)
+  salvarSessao(await contexto.storageState())
   for (const c of fila) {
     try {
       const m = await lerLead(page, c.lead_id)

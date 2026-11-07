@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dia: { description: 'Dia das conversas (AAAA-MM-DD). Vazio = ontem', default: '' }
+      codigo: { description: 'Código de verificação da Kommo (só quando ela pedir)', default: '' }
 concurrency: { group: kommo, cancel-in-progress: false }
 permissions: { contents: read }
 jobs:
@@ -17,6 +18,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
+      - uses: actions/cache/restore@v4
+        with: { path: kommo/.sessao.enc, key: kommo-sessao-${{ github.run_id }}, restore-keys: kommo-sessao- }
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: node ler.mjs
@@ -25,3 +28,7 @@ jobs:
           KOMMO_SENHA: ${{ secrets.KOMMO_SENHA }}
           IDEALIZE_SERVICE_KEY: ${{ secrets.IDEALIZE_SERVICE_KEY }}
           DIA: ${{ inputs.dia }}
+          CODIGO: ${{ inputs.codigo }}
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('kommo/.sessao.enc') != ''
+        with: { path: kommo/.sessao.enc, key: kommo-sessao-${{ github.run_id }} }
