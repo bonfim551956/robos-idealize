@@ -19,7 +19,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - uses: actions/cache/restore@v4
-        with: { path: kommo/.sessao.enc, key: kommo-sessao-${{ github.run_id }}, restore-keys: kommo-sessao- }
+        with:
+          path: kommo/.sessao.enc
+          key: kommo-sessao-${{ github.run_id }}
+          restore-keys: kommo-sessao-
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: node ler.mjs
@@ -31,4 +34,6 @@ jobs:
           CODIGO: ${{ inputs.codigo }}
       - uses: actions/cache/save@v4
         if: always() && hashFiles('kommo/.sessao.enc') != ''
-        with: { path: kommo/.sessao.enc, key: kommo-sessao-${{ github.run_id }} }
+        with:
+          path: kommo/.sessao.enc
+          key: kommo-sessao-${{ github.run_id }}
