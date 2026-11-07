@@ -7,12 +7,13 @@ on:
     inputs:
       dias: { description: 'Detalhe dos últimos N dias', default: '3' }
       meses: { description: '1 = mês corrente; 2 = inclui o anterior', default: '1' }
+      docs_dias: { description: 'Documentos das vendas dos últimos N dias', default: '30' }
 concurrency: { group: multicrediario, cancel-in-progress: false }
 permissions: { contents: read }
 jobs:
   ler:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults: { run: { working-directory: multicrediario } }
     steps:
       - uses: actions/checkout@v4
@@ -27,3 +28,4 @@ jobs:
           IDEALIZE_SERVICE_KEY: ${{ secrets.IDEALIZE_SERVICE_KEY }}
           DIAS: ${{ inputs.dias || '3' }}
           MESES: ${{ inputs.meses || '1' }}
+          DOCS_DIAS: ${{ inputs.docs_dias || '30' }}

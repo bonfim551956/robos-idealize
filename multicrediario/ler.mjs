@@ -1,15 +1,16 @@
 // Robô de leitura do Multicrediário — pedido do Diego em 07/11/2026 (PODE FAZER). Só leitura.
-// Lê: Relatório de Operação (+ detalhe de cada dia), Recebimentos (+ detalhe de cada dia) e Status Garantia (T/G/P),
-// e grava cada tela como veio (cabeçalho + linhas) em multi.capturas (Idealize AI) pela função public.multi_receber.
+// Lê: Relatório de Operação (+ detalhe de cada dia), Recebimentos (+ detalhe de cada dia), Status Garantia (T/G/P) e,
+// cliente por cliente, a tela Foto/Documentos de cada venda aprovada (fila: public.multi_docs_fila), e grava cada tela como veio (cabeçalho + linhas) em multi.capturas (Idealize AI) pela função public.multi_receber.
 // O log só mostra contagens (o repositório pode estar público).
 import { chromium } from 'playwright'
 
 const BASE = 'https://cliente.multicrediario.com.br'
 const { MULTI_USUARIO, MULTI_SENHA, IDEALIZE_SERVICE_KEY } = process.env
 const IDEALIZE_URL = process.env.IDEALIZE_URL || 'https://upkxaovgutzgackexhax.supabase.co'
-const DIAS = Math.min(Number(process.env.DIAS || 3), 62)          // detalhe dos últimos N dias
-const MESES = Math.min(Number(process.env.MESES || 1), 3)        // 1 = mês corrente; 2 = inclui o anterior
+const DIAS = Math.min(Number(process.env.DIAS || 3), 100)          // detalhe dos últimos N dias
+const MESES = Math.min(Number(process.env.MESES || 1), 4)        // 1 = mês corrente; 2 = inclui o anterior
 const LOJA = process.env.LOJA || 'sao_vicente'
+const DOCS_DIAS = Math.min(Number(process.env.DOCS_DIAS || 30), 90)  // documentos das vendas dos últimos N dias
 if (!MULTI_USUARIO || !MULTI_SENHA || !IDEALIZE_SERVICE_KEY) { console.error('Faltam os Secrets MULTI_USUARIO, MULTI_SENHA ou IDEALIZE_SERVICE_KEY.'); process.exit(1) }
 
 const h = { apikey: IDEALIZE_SERVICE_KEY, Authorization: `Bearer ${IDEALIZE_SERVICE_KEY}`, 'Content-Type': 'application/json' }
@@ -87,6 +88,32 @@ async function garantias(page) {
   }
 }
 
+// Foto/Documentos: busca o CPF em Localiza Consumidor, abre a lupa e lê a tabela de documentos (só leitura)
+async function documentos(page) {
+  const fila = await rpc('multi_docs_fila', { p_dias: DOCS_DIAS, p_limite: 80 })
+  let lidos = 0, falhas = 0
+  for (const v of fila || []) {
+    try {
+      await page.goto(BASE + '/Consumidor/LocalizaConsumidor/ConsumidorLocaliza?tipoLocaliza=2', { waitUntil: 'domcontentloaded' })
+      await page.locator('#parametroConsulta').fill(v.cpf)
+      await page.locator('#btn_localizar').click()
+      const lupa = page.locator('table a[onclick*="ApresentaDocumentos"]').first()
+      await lupa.waitFor({ timeout: 20000 })
+      const alvo = (String(await lupa.getAttribute('onclick')).match(/submit_href\('([^']+)'/) || [])[1]
+      if (!alvo) throw new Error('lupa sem link')
+      await page.evaluate(x => window.submit_href(x), alvo)
+      await page.waitForURL(/ApresentaDocumentos/i, { timeout: 30000 })
+      await page.locator('table th').first().waitFor({ timeout: 20000 })
+      const tab = (await lerTabelas(page)).find(t => t.cabecalho.some(c => /Tipo de Documento/i.test(c)))
+      if (!tab) throw new Error('tabela de documentos não encontrada')
+      await gravar('documentos', `${v.cpf}|${v.venda}`, v.dia, tab)
+      lidos++
+    } catch (e) { falhas++; console.error('documentos: ' + String(e.message || e).split('\n')[0].slice(0, 120)) }
+  }
+  console.log(`Documentos: ${lidos} venda(s) lida(s), ${falhas} falha(s), de ${(fila || []).length} na fila.`)
+  if (falhas && !lidos) throw new Error('nenhum documento lido')
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 let ok = true
@@ -95,10 +122,11 @@ try {
   await relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelOperacao', 'operacao')
   await relatorioMensal(page, '/Relatorios/RelatoriosFechamentoDiario/RelRecebimentos', 'recebimentos')
   await garantias(page)
+  await documentos(page)
 } catch (e) {
   ok = false
   console.error('Falhou:', String(e.message || e).split('\n')[0].slice(0, 200), '| tela:', new URL(page.url()).pathname)
 } finally { await browser.close() }
-await rpc('multi_rodada', { p_resumo: { ok, telas, linhas: linhasTot, dias: DIAS, meses: MESES, loja: LOJA } }).catch(() => {})
+await rpc('multi_rodada', { p_resumo: { ok, telas, linhas: linhasTot, dias: DIAS, meses: MESES, docs_dias: DOCS_DIAS, loja: LOJA } }).catch(() => {})
 console.log(`Telas lidas ${telas}, linhas ${linhasTot}, ${ok ? 'sem erro' : 'com erro'}.`)
 if (!ok) process.exit(1)
