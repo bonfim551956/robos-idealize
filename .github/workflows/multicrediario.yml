@@ -1,8 +1,8 @@
-# Robô de leitura do Multicrediário (São Vicente). Só leitura. Todo dia às 7h (Brasília) e na mão em "Run workflow".
+# Robô de leitura do Multicrediário (São Vicente). Só leitura. De hora em hora, 8h às 20h (Brasília) e na mão em "Run workflow".
 name: Multicrediário (leitura)
 on:
   schedule:
-    - cron: '3 10 * * *'
+    - cron: '3 11-23 * * *'
   workflow_dispatch:
     inputs:
       dias: { description: 'Detalhe dos últimos N dias', default: '3' }
