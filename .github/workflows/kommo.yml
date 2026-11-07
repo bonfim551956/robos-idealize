@@ -1,0 +1,27 @@
+# Robô de leitura da Kommo (auditoria do atendimento). Só leitura. Todo dia às 6h50 (Brasília) e na mão em "Run workflow".
+name: Kommo (auditoria do atendimento)
+on:
+  schedule:
+    - cron: '50 9 * * *'
+  workflow_dispatch:
+    inputs:
+      dia: { description: 'Dia das conversas (AAAA-MM-DD). Vazio = ontem', default: '' }
+concurrency: { group: kommo, cancel-in-progress: false }
+permissions: { contents: read }
+jobs:
+  ler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults: { run: { working-directory: kommo } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node ler.mjs
+        env:
+          KOMMO_EMAIL: ${{ secrets.KOMMO_EMAIL }}
+          KOMMO_SENHA: ${{ secrets.KOMMO_SENHA }}
+          IDEALIZE_SERVICE_KEY: ${{ secrets.IDEALIZE_SERVICE_KEY }}
+          DIA: ${{ inputs.dia }}
