@@ -55,6 +55,12 @@ async function localizar(page) {
 }
 
 // relatório mensal (Operação ou Recebimentos) + detalhe de cada dia recente
+async function esperarTabela(page, ms) {
+  const tabela = page.locator('table th').first().waitFor({ timeout: ms }).then(() => 'tabela')
+  const vazio = page.getByText(/nenhum registro|não (há|foram encontrad)|sem registros|nenhum resultado/i).first().waitFor({ timeout: ms }).then(() => 'vazio')
+  return await Promise.any([tabela, vazio]).catch(() => null)
+}
+
 async function relatorioMensal(page, caminho, nome) {
   for (let m = 0; m < MESES; m++) {
     await page.goto(BASE + caminho, { waitUntil: 'domcontentloaded' })
@@ -63,9 +69,14 @@ async function relatorioMensal(page, caminho, nome) {
     if (idx + m >= opcoes.length) break
     await page.locator('#periodo').selectOption({ index: idx + m })
     await localizar(page)
-    await page.locator('table th').first().waitFor({ timeout: 30000 })
-    const tabs = await lerTabelas(page)
-    await gravar(nome, `periodo=${opcoes[idx + m].trim()}`, null, tabs[0])
+    // a tela pode demorar (mês cheio) ou vir sem tabela (nenhum registro no período): espera até 90 s e tenta de novo uma vez
+    let achou = await esperarTabela(page, 90000)
+    if (!achou) { await localizar(page); achou = await esperarTabela(page, 90000) }
+    if (!achou) throw new Error(`${nome}: a tela não carregou em 3 minutos`)
+    const temTabela = achou === 'tabela'
+    const tabs = temTabela ? await lerTabelas(page) : []
+    await gravar(nome, `periodo=${opcoes[idx + m].trim()}`, null, tabs[0] || { cabecalho: [], linhas: [] })
+    if (!temTabela) { console.log(`${nome}: nenhum registro no período ${opcoes[idx + m].trim()}`); continue }
     const links = (await linksDetalhe(page)).filter(u => noPrazo((u.match(/Data=([\d/]+)/) || [])[1]))
     for (const u of links) {
       await page.evaluate(x => window.submit_href(x), u)
