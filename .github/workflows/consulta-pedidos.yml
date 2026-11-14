@@ -1,0 +1,30 @@
+# Robô da Consulta de Pedidos (Central Idealize). Só leitura. Acordado pela função consulta-pedido quando alguém
+# consulta um pedido no Central; fica alguns minutos atendendo a fila e desliga sozinho. Também roda na mão em "Run workflow".
+name: Consulta de Pedidos (Braslab e Haytek)
+on:
+  workflow_dispatch:
+concurrency: { group: consulta-pedidos, cancel-in-progress: false }
+permissions: { contents: read }
+jobs:
+  consultar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults: { run: { working-directory: consulta-pedidos } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.48.2
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: node consultar.mjs
+        env:
+          CONSULTA_CHAVE: ${{ secrets.CONSULTA_CHAVE }}
+          BRASLAB_LOGIN: ${{ secrets.BRASLAB_LOGIN }}
+          BRASLAB_SENHA: ${{ secrets.BRASLAB_SENHA }}
+          HAYTEK_EMAIL: ${{ secrets.HAYTEK_EMAIL }}
+          HAYTEK_SENHA: ${{ secrets.HAYTEK_SENHA }}

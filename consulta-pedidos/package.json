@@ -1,0 +1,7 @@
+{
+  "name": "robo-consulta-pedidos",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" },
+  "dependencies": { "playwright": "1.48.2" }
+}
