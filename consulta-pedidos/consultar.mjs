@@ -60,7 +60,14 @@ async function diagnostico(page) {
 // ---------- Braslab (WebPedidos) ----------
 async function braslabEntrar(page) {
   if (!BRASLAB_LOGIN || !BRASLAB_SENHA) throw new ErroConsulta('Login da Braslab não configurado.')
-  await page.goto(`${BRASLAB}/auth/login?acesso=braslab-prod&sistema=otica`, { waitUntil: 'domcontentloaded' })
+  const resp = await page.goto(`${BRASLAB}/auth/login?acesso=braslab-prod&sistema=otica`, { waitUntil: 'domcontentloaded' })
+  if (resp && resp.status() >= 400) {
+    // diagnóstico do bloqueio (sem dados de cliente): código, quem respondeu e o começo do texto da página
+    const h = resp.headers()
+    const texto = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300)
+    console.log('Braslab respondeu', resp.status(), JSON.stringify({ server: h.server, cfRay: h['cf-ray'] ? 'sim' : 'não', via: h.via, texto }))
+    throw new ErroConsulta('A Braslab bloqueou o acesso do robô (código ' + resp.status() + ').')
+  }
   if (!new URL(page.url()).pathname.startsWith('/auth')) { contextos.braslab.logado = true; return }
   const usuario = page.getByPlaceholder('Informe seu login')
   const achou = await usuario.waitFor().then(() => true).catch(() => false)
